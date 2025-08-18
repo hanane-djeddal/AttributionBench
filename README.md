@@ -7,6 +7,7 @@ Code and datasets for the paper <a href="https://arxiv.org/abs/2402.15089">Attri
 <img src="AttributionBench.png" width=100% />
 
 ### Updates:
+* 05/15/24: Our work is accepted to ACL 2024 Findings.
 * 02/26/24: We have made the initial release of our code and data. Please feel free to open an issue if you run into any problems.
 
 ## Dataset
