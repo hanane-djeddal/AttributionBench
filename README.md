@@ -2,10 +2,10 @@
 This is the official code repo for the paper <a href="https://arxiv.org/abs/2402.15089">AttributionBench: How Hard is Automatic Attribution Evaluation?"</a>.
 
 <p align="center">
-  <a href="https://osu-nlp-group.github.io/AttributionBench/">[Project Page]</a> • 
+  <a href="https://osu-nlp-group.github.io/AttributionBench/">[Website]</a> • 
   <a href="https://aclanthology.org/2024.findings-acl.886.pdf">[Paper]</a> •
-  <a href="https://huggingface.co/datasets/osunlp/AttributionBench">[🤗 Dataset]</a> •
-  <a href="https://osu-nlp-group.github.io/AttributionBench/">[Twitter]</a>
+  <a href="https://huggingface.co/datasets/osunlp/AttributionBench">[Dataset]</a> •
+  <a href="https://x.com/YifeiLiPKU/status/1791279510576357848">[Twitter]</a>
 </p>
 
 <img src="AttributionBench.png" width=90% />
