@@ -27,7 +27,7 @@ echo ${CUDA_VISIBLE_DEVICES}
 # ************************************************************************************
 export OUTPUT_DIR=../checkpoints/${model}-${dataset_version}-${setting}
 
-rm -rf $OUTPUT_DIR
+#rm -rf $OUTPUT_DIR
 # ************************************************************************************
 
 # torchrun --nproc_per_node ${nodes} --master-port ${master_port} ../src/train/run_mixtral_8x7b.py \

@@ -12,6 +12,11 @@ from transformers import Seq2SeqTrainer
 from datasets import load_dataset, Features, Value
 import datasets
 import json
+import os
+
+os.environ['HF_HOME'] = os.environ['WORK'] + '/.cache/huggingface'
+os.environ['WANDB_MODE'] = 'offline'
+#os.environ["WANDB_PROJECT"] = "bench_autoais"
 
 IGNORE_INDEX = -100
 DEFAULT_PAD_TOKEN = "<pad>"
@@ -58,13 +63,32 @@ def postprocess_text(preds, labels):
     labels = [label.strip() for label in labels]
     return preds, labels
 
+# def compute_metrics(eval_preds):
+#     print("Computing Metric")
+#     preds = eval_preds.predictions  # These are now token IDs, not logits
+#     labels = eval_preds.label_ids
+    
+#     decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
+    
+#     # Replace -100 in the labels
+#     labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
+#     decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
+    
+#     # Some simple post-processing
+#     decoded_preds, decoded_labels = postprocess_text(decoded_preds, decoded_labels)
+#     result = [int(p.startswith(l)) for p, l in zip(decoded_preds, decoded_labels)]
+    
+#     return {"accuracy": sum(result) / len(result)}
 
 def compute_metrics(eval_preds):
+    print("Computing Metric")
     logits = (
         eval_preds.predictions[0]
         if isinstance(eval_preds.predictions, tuple)
         else eval_preds.predictions
     )
+    max_length = 128  # Adjust as needed
+    logits = logits[:, :max_length, :]  # Truncate before argmax
     preds = np.argmax(logits, axis=-1)
     labels = eval_preds.label_ids
 
@@ -240,20 +264,30 @@ class SupervisedDataset(Dataset):
             }
         )
         # Load the dataset
+        data_path=os.environ['WORK']+"/AttributionBench"
+        data = datasets.load_from_disk(data_path)
         if split in ["stanford_dev", "attributedqa_dev", "hagrid_dev", "expertqa_dev"]:
-            dataset = load_dataset(
-                self.dataset_path,
-                name=data_args.dataset_version,
-                split="dev",
-                features=features,
-            )
+            # dataset = load_dataset(
+            #     self.dataset_path,
+            #     name=data_args.dataset_version,
+            #     split="dev",
+            #     features=features,
+            # )
+            dataset=data["dev"] 
+        elif split == "train":
+            data_path=os.environ['WORK']+"/"+ data_args.dataset_version #"/AttributionBench"
+            data = datasets.load_from_disk(data_path)
+            dataset=data[split]#.select(range(100))
         else:
-            dataset = load_dataset(
-                self.dataset_path,
-                name=data_args.dataset_version,
-                split=split,
-                features=features,
-            )
+            data_path=os.environ['WORK']+"/AttributionBench"
+            data = datasets.load_from_disk(data_path)
+            # dataset = load_dataset(
+            #     self.dataset_path,
+            #     name=data_args.dataset_version,
+            #     split=split,
+            #     features=features,
+            # )
+            dataset=data[split] 
 
         # Tokenize the dataset in a batched way
         tokenized_dataset = dataset.map(
@@ -347,7 +381,7 @@ def train():
     )
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     # Suppress wandb
-    training_args.report_to = []
+    training_args.report_to = "wandb" #[] 
 
     with open(data_args.template_path) as f:
         template = json.load(f)
@@ -367,6 +401,7 @@ def train():
     )
 
     data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args)
+    print(f"GPU memory: {torch.cuda.memory_allocated()/1e9:.2f} GB")
     trainer = Seq2SeqTrainer(
         model=model,
         tokenizer=tokenizer,
@@ -375,6 +410,7 @@ def train():
         **data_module,
     )
     trainer.train()
+    print(f"GPU memory: {torch.cuda.memory_allocated()/1e9:.2f} GB")
     trainer.save_state()
     trainer.save_model(output_dir=training_args.output_dir)
 

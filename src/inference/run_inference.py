@@ -7,6 +7,7 @@ from transformers import (
     AutoTokenizer,
 )
 from datasets import load_dataset, concatenate_datasets, Features, Value, Sequence
+import datasets
 from pathlib import Path
 import os
 import json
@@ -28,10 +29,20 @@ import numpy as np
 import hashlib
 from argparse import ArgumentParser
 import sys
+from vllm import LLM, SamplingParams
+from vllm.lora.request import LoRARequest
 
 sys.path.append(".")
 import pdb
+import os
 
+os.environ['HF_HOME'] = os.environ['WORK'] + '/.cache/huggingface'
+os.environ['WANDB_MODE'] = 'offline'
+
+MAX_MODEL_LEN = 4096 
+MAX_NEW_TOKENS = 1024
+
+MAX_PROMPT_FOR_TRUNCATION = MAX_MODEL_LEN - MAX_NEW_TOKENS
 
 def remove_slash(t):
     return t.replace("/", "_")
@@ -236,6 +247,7 @@ def icl_combination(
     return {"processed_text": combined_data, "src_dataset": test_datas["src_dataset"]}
 
 
+
 class HelloWord:
     def __init__(self, model_name, args):
         self.args = args
@@ -244,7 +256,15 @@ class HelloWord:
         architectures = self.config.architectures[0]
         self.is_llama = "llama" in architectures.lower()
 
+        self.is_qwen = "qwen" in architectures.lower() #"llama" 
+
         if "Conditional" in architectures:
+            self.only_decoder = False
+            self.model = T5ForConditionalGeneration.from_pretrained(
+                model_name, device_map="auto"
+            )
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        elif "ContrastiveT5" in architectures:
             self.only_decoder = False
             self.model = T5ForConditionalGeneration.from_pretrained(
                 model_name, device_map="auto"
@@ -260,6 +280,18 @@ class HelloWord:
             )
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
+            # if self.is_qwen:
+            #     self.model = LLM(
+            #         model=model_name,
+            #         tensor_parallel_size=torch.cuda.device_count(),
+            #         gpu_memory_utilization=0.9,
+            #         max_model_len=MAX_MODEL_LEN,
+            #         dtype='bfloat16',
+            #         enforce_eager=False,
+            #         # for LORA
+            #         trust_remote_code=True,
+            #         #enable_lora=True,
+            #     )
         self.model.eval()
         gen_kwargs = {
             "pad_token_id": self.tokenizer.pad_token_id,
@@ -273,32 +305,201 @@ class HelloWord:
             max_new_tokens=self.args.max_new_tokens,
             **gen_kwargs,
         )
+    def generate_with_qwen3(self, batch):
+        """
+        Generate text using Qwen3 with thinking token support.
+        
+        Args:
+            batch: List of input texts or single text string
+        """
+        # Tokenize input
+        tokenized_batch = self.tokenizer(
+            batch,
+            truncation=True,
+            padding=True,
+            return_tensors="pt",
+            max_length=self.args.max_length,
+            return_token_type_ids=False,
+        ).to(self.model.device)
+        
+        # Generate with Qwen3
+        with torch.inference_mode():
+            generated_ids = self.model.generate(
+                **tokenized_batch,
+                generation_config=self.gen_config
+            )
+        
+        # Process outputs for each item in batch
+        output_texts = []
+        thinking_contents = []
+        
+        batch_size = tokenized_batch["input_ids"].shape[0]
+        input_lengths = tokenized_batch["attention_mask"].sum(dim=1).tolist()
+        
+        for i in range(batch_size):
+            # Extract only the generated tokens (exclude input)
+            output_ids = generated_ids[i][input_lengths[i]:].tolist()
+            
+            # Parse thinking content (find </think> token: 151668)
+            try:
+                # Find the last occurrence of 151668 (</think>)
+                index = len(output_ids) - output_ids[::-1].index(151668)
+            except ValueError:
+                # No thinking token found
+                index = 0
+            
+            # Decode thinking content and actual response
+            thinking_content = self.tokenizer.decode(
+                output_ids[:index], 
+                skip_special_tokens=True
+            ).strip("\n")
+            
+            content = self.tokenizer.decode(
+                output_ids[index:], 
+                skip_special_tokens=True
+            ).strip("\n")
+            
+            thinking_contents.append(thinking_content)
+            output_texts.append(content)
+        
+        return output_texts, thinking_contents
 
+    def prepare_input(self,batch):
+        """
+        """
+        all_inputs=[]
+        for msg in batch:
+
+            # Apply chat template
+            text_input = self.tokenizer.apply_chat_template(
+                msg, add_generation_prompt=True, return_tensors="pt",tokenize=False,enable_thinking=False 
+            )
+            all_inputs.append(text_input)
+        return all_inputs
+
+    def generate_vllm(self,all_inputs):
+
+        sampling_params = SamplingParams(
+            temperature=0.7,
+            top_p=0.9,
+            max_tokens=MAX_NEW_TOKENS,
+            truncate_prompt_tokens=MAX_PROMPT_FOR_TRUNCATION 
+        )
+        all_outputs=self.model.generate(all_inputs, sampling_params) # [inputs]
+
+        all_answers=[]
+        for idx_output, raw_output in enumerate(all_outputs):
+            output = raw_output.outputs[0].text
+            
+            try:
+                # rindex finding 151668 (</think>)
+                index_txt = len(output) - output.index("</think>")
+            except ValueError:
+                index_txt = 0
+            try:
+                # rindex finding 151668 (</think>)
+                index = len(raw_output.outputs[0].token_ids) - raw_output.outputs[0].token_ids[::-1].index(151668)
+            except ValueError:
+                index = 0
+
+
+            # thinking_content = output[:index_txt].strip("\n")
+            # content = output[index_txt:].strip("\n")
+
+            # print("txtttt thinking content:", thinking_content)
+            # print("content:", content)
+
+
+            thinking_content = qwen_tokenizer.decode(raw_output.outputs[0].token_ids[:index], skip_special_tokens=True).strip("\n")
+            content = qwen_tokenizer.decode(raw_output.outputs[0].token_ids[index:], skip_special_tokens=True).strip("\n")
+
+            print("thinking content:", thinking_content)
+            print("content:", content)
+
+
+            
+            # Decode and extract result
+            result = content #tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
+            result = result.strip()
+            # if '1' in result or 'GROUNDED' in result.upper():
+            #     filetred_answer= 1
+            # else:
+            #     filetred_answer= 0
+            all_answers.append(result) #filetred_answer)
+        return all_answers
     @torch.no_grad()
     def _inference(self, examples):
         outputs = []
         pbar = tqdm(total=len(examples), desc="do inference")
         for batch in batch_samples(examples, self.bs):
+            
             try:
-                tokenized_batch = self.tokenizer(
-                    batch,
-                    truncation=True,
-                    padding=True,
-                    return_tensors="pt",
-                    max_length=self.args.max_length,
-                    return_token_type_ids=False,
-                ).to(self.model.device)
-                output = self.model.generate(
-                    **tokenized_batch, generation_config=self.gen_config
-                )
-                # pdb.set_trace()
-                if self.only_decoder and self.is_llama:
+                if self.only_decoder and self.is_qwen:
+                    all_inputs= self.prepare_input(batch)
+                    tokenized_batch = self.tokenizer(
+                            all_inputs,
+                            truncation=True,
+                            padding=True,
+                            return_tensors="pt",
+                            max_length=self.args.max_length,
+                            return_token_type_ids=False,
+                        ).to(self.model.device)
+                    output = self.model.generate(
+                        **tokenized_batch,
+                        max_new_tokens=1024,  # We only need 1 token (0 or 1)
+                    )
                     output = output[:, tokenized_batch["input_ids"].shape[-1] :]
+                    outputs_all = self.tokenizer.batch_decode(
+                            output, skip_special_tokens=True
+                        )
+                    output_text=[]
+                    for result in outputs_all:
+                        if '1' in result or 'GROUNDED' in result.upper():
+                            output_text.append("attributable")
+                        else:
+                            output_text.append("not attributable")
+                    print("Qwen output",output_text)
+                        # output_text = self.generate_vllm(all_inputs)
+                        # logger.info("qwen outputs")
+                        # logger.info(output_text[0])
+                        # #logger.info(thinking_contents)
                 else:
-                    output = output
-                output_text = self.tokenizer.batch_decode(
-                    output, skip_special_tokens=True
-                )
+                    tokenized_batch = self.tokenizer(
+                        batch,
+                        truncation=True,
+                        padding=True,
+                        return_tensors="pt",
+                        max_length=self.args.max_length,
+                        return_token_type_ids=False,
+                    ).to(self.model.device)
+                    output = self.model.generate(
+                        **tokenized_batch, generation_config=self.gen_config
+                    )
+                    # pdb.set_trace()
+                    if self.only_decoder and self.is_qwen:
+                        output = output[:, tokenized_batch["input_ids"].shape[-1] :]
+                    if self.only_decoder and self.is_llama:
+                        output = output[:, tokenized_batch["input_ids"].shape[-1] :]
+                    # elif self.only_decoder and self.is_qwen:
+                    #     output=  output[:, tokenized_batch["input_ids"].shape[-1] :]
+                    #     for generated_ids in output:
+                    #         print("raw output qwen:", self.tokenizer.decode(generated_ids, skip_special_tokens=True).strip("\n"))
+                    #         output_ids  = generated_ids[0][len(inputs.input_ids[0]):].tolist()
+                    #         try:
+                    #             # rindex finding 151668 (</think>)
+                    #             index = len(output_ids) - output_ids[::-1].index(151668)
+                    #         except ValueError:
+                    #             index = 0
+
+                    #         thinking_content = self.tokenizer.decode(output_ids[:index], skip_special_tokens=True).strip("\n")
+                    #         content = self.tokenizer.decode(output_ids[index:], skip_special_tokens=True).strip("\n")
+                    #         output_text = content
+                    else:
+                        output = output
+                    output_text = self.tokenizer.batch_decode(
+                        output, skip_special_tokens=True
+                    )
+                    #print(output_text)
 
             except:
                 print("run one by one")
@@ -329,8 +530,6 @@ class HelloWord:
             outputs.extend(output_text)
             pbar.update(self.bs)
         # pdb.set_trace()
-        logger.info("raw_outputs")
-        logger.info(outputs)
         return outputs
 
     def inference(self, examples):
@@ -467,7 +666,15 @@ class AttrBench(HelloWord):
                 input = input_template.format(answer, documents_concatenation)
 
             instructions = json.load(open(args.template_path))
-            formatted_prompt = "{}{}".format(instructions[prompt_name]["llama2"], input)
+            messages = [
+                    {
+                    "role": "system",
+                    "content": instructions[prompt_name]["qwen3"],
+                    },
+                    {"role": "user", 
+                    "content": input}
+                ]
+            formatted_prompt = messages #"{}{}".format(instructions[prompt_name]["llama2"], input)
 
             return formatted_prompt
 
@@ -542,9 +749,13 @@ def main(args):
                 "id": Value("string"),  # 字符串字段
             }
         )
-        datas = load_dataset(
-            args.data_path, name=args.dataset_version, split=split, features=features
-        )
+        data_path=os.environ['WORK']+ "/AttributionBench"
+        data = datasets.load_from_disk(data_path)
+        datas=data[split]
+       
+        # datas = load_dataset(
+        #     args.data_path, name=args.dataset_version, split=split, features=features
+        # )
         print(len(datas))
         # pdb.set_trace()
         if args.source_only != "":

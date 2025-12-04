@@ -32,6 +32,10 @@ import numpy as np
 from transformers import TrainerCallback, TrainerState, TrainerControl
 from sklearn.metrics import precision_score, recall_score, f1_score
 import pdb
+import os
+
+os.environ['HF_HOME'] = os.environ['WORK'] + '/.cache/huggingface'
+os.environ['WANDB_MODE'] = 'offline'
 
 random.seed(42)
 
@@ -154,8 +158,19 @@ class SupervisedDataset(Dataset):
                 input = input_template.format(answer, documents_concatenation)
             
             instructions = json.load(open(self.data_args.template_path))
-            formatted_prompt = "{}{}".format(instructions[prompt_name]["llama2"], input)
+            messages = [
+                    {
+                    "role": "system",
+                    "content": instructions[prompt_name]["qwen3"],
+                    },
+                    {"role": "user", 
+                    "content": input}
+                ]
+            #formatted_prompt = messages #"{}{}".format(instructions[prompt_name]["llama2"], input)
 
+            formatted_prompt = self.tokenizer.apply_chat_template(
+                messages, add_generation_prompt=True, return_tensors="pt",tokenize=False,enable_thinking=False 
+            )
             return formatted_prompt
 
         if self.generator_or_evaluator == "evaluator":
@@ -199,11 +214,14 @@ class SupervisedDataset(Dataset):
             'src_dataset': Value('string'),  # 字符串字段
             'id': Value('string'),  # 字符串字段
         })
+
+        data_path=os.environ['WORK']+ "/AttributionBench"
+        data = datasets.load_from_disk(data_path)
         # Load the dataset
         if split in ["stanford_dev", "attributedqa_dev", "hagrid_dev", "expertqa_dev"]:
-            dataset = load_dataset(self.dataset_path, name=data_args.dataset_version, split="dev", features=features)
+            dataset=data["dev"] #dataset = load_dataset(self.dataset_path, name=data_args.dataset_version, split="dev", features=features)
         else:
-            dataset = load_dataset(self.dataset_path, name=data_args.dataset_version, split=split, features=features)
+            dataset=data[split]  #dataset = load_dataset(self.dataset_path, name=data_args.dataset_version, split=split, features=features)
         # add data filter here (subset / delete some field / etc)
         if "train" in split:
             # if train set only contains 1 single dataset, then filter the others out from train split

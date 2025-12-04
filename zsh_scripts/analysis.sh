@@ -1,6 +1,6 @@
 #!/bin/bash
 
-dataset_versions=("subset_balanced")
+dataset_versions=("attributionBench_augmentedv1_shuffled_mixedalltrainfiltered2" "AttributionBench" "attributionBench_contrastive1neg_mismatch")
 # dataset_versions=("subset_balanced" "overall_balanced" "not_balanced" "full_data")
 
 for dataset_version in "${dataset_versions[@]}"; do

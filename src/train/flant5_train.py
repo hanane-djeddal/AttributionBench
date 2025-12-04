@@ -236,6 +236,9 @@ class SupervisedDataset(Dataset):
                 split="dev",
                 features=features,
             )
+            # data_path=os.environ['WORK']+ "/AttributionBench"
+            # data = datasets.load_from_disk(data_path)
+            # dataset=data["dev"] 
         else:
             dataset = load_dataset(
                 self.dataset_path,
