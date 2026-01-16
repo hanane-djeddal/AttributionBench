@@ -10,7 +10,8 @@ export TRANSFORMERS_OFFLINE=1
 for model in "${models[@]}"; do
     # 32 1e-5
     # ***************** Set parameters here *****************
-    dataset_version=AttributionBench #attributionBench_augmentedv1_shuffled_mixedalltrainfiltered2 #subset_balanced AttributionBench #
+    dataset_version=attributionBench_hardpos_augmentedQwen30B_allerror #attributionBench_hardpos_augmentedQwen30B_allerror_mixed_alltrain
+    #attributionBench_hardpos_augmentedQwen30B_allerror #_shuffled #AttributionBench #attributionBench_augmentedv1_shuffled_mixedalltrainfiltered2 #subset_balanced AttributionBench #
     template=base_c_e
     lr=1e-5
     num_train_epoches=2
@@ -23,7 +24,7 @@ for model in "${models[@]}"; do
     # ***************** The followings are auto-calculated parameters *****************
     cuda_devices=$(seq -s ',' $start_gpu_index $(($start_gpu_index + $nodes - 1)))
     export CUDA_VISIBLE_DEVICES=$cuda_devices
-    nodes=8
+    nodes=4
     bs=$((gas * nodes))
     eval_bs=1 #$((per_device_train_batch_size * 2))
     setting=template-${template}-bs${bs}-lr${lr}-gas${gas}
@@ -67,30 +68,30 @@ for model in "${models[@]}"; do
     #     --fsdp_transformer_layer_cls_to_wrap 'T5Block'\
 
     # inference
-    # python ../src/inference/run_inference.py \
-    #     --method autoais \
-    #     --data_path AttributionBench \
-    #     --dataset_version ${dataset_version} \
-    #     --template_path ../src/prompts.json \
-    #     --model_name ${OUTPUT_DIR} \
-    #     --bs 1 \
-    #     --split test_ood test \
-    #     --output_dir ../inference_results/${dataset_version} \
-    #     --max_length 2048  \
-    #     --max_new_tokens 6 \
-    #     --template ${template}
-
-    # zero-shot
     python ../src/inference/run_inference.py \
         --method autoais \
         --data_path AttributionBench \
         --dataset_version ${dataset_version} \
         --template_path ../src/prompts.json \
-        --model_name $model \
-        --bs 4 \
-        --split test \
+        --model_name ${OUTPUT_DIR} \
+        --bs 1 \
+        --split test_ood test \
         --output_dir ../inference_results/${dataset_version} \
         --max_length 2048  \
         --max_new_tokens 6 \
         --template ${template}
+
+    # zero-shot
+    # python ../src/inference/run_inference.py \
+    #     --method autoais \
+    #     --data_path AttributionBench \
+    #     --dataset_version ${dataset_version} \
+    #     --template_path ../src/prompts.json \
+    #     --model_name $model \
+    #     --bs 4 \
+    #     --split test \
+    #     --output_dir ../inference_results/${dataset_version} \
+    #     --max_length 2048  \
+    #     --max_new_tokens 6 \
+    #     --template ${template}
 done

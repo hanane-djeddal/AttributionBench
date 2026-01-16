@@ -42,6 +42,8 @@ class DataArguments:
             "help": "Contained datasets (e.g., ExpertQA, hagrid, etc. 'all' for containing all datasets.)"
         },
     )
+    
+    error_type: str = field(default=None)
     template: str = field(default="base_c_e")
     template_path: str = field(default="src/train/template.json")
 
@@ -278,6 +280,9 @@ class SupervisedDataset(Dataset):
             data_path=os.environ['WORK']+"/"+ data_args.dataset_version #"/AttributionBench"
             data = datasets.load_from_disk(data_path)
             dataset=data[split]#.select(range(100))
+            # df = pd.DataFrame.from_dict(dataset.to_list())
+            # other= df[df["example_type"].isin("other","hard_positive")]
+            # df=df[df["error_type"]==data_args.error_type]
         else:
             data_path=os.environ['WORK']+"/AttributionBench"
             data = datasets.load_from_disk(data_path)
