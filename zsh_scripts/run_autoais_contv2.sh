@@ -10,22 +10,20 @@ export TRANSFORMERS_OFFLINE=1
 for model in "${models[@]}"; do
     # 32 1e-5
     # ***************** Set parameters here *****************
-    dataset_version=attributionBench_hardpos_augmentedQwen30B_error_trueOptimshuffled
-    #attributionBench_hardpos_augmentedQwen30B_allerror #attributionBench_hardpos_augmentedQwen30B_allerror_mixed_alltrain
-    #attributionBench_hardpos_augmentedQwen30B_allerror #_shuffled #AttributionBench #attributionBench_augmentedv1_shuffled_mixedalltrainfiltered2 #subset_balanced AttributionBench #
+    dataset_version=attributionBench_hardpos_augmentedQwen30B_allerrors_contrastive 
     template=base_c_e
-    lr=1e-5
+    lr=3e-5  #1e-5
     num_train_epoches=2
     start_gpu_index=0
     master_port=11111
     per_device_train_batch_size=1
     gas=4
-    nodes=8
+    nodes=4
     cche_dir=$WORK/.cache/huggingface
     # ***************** The followings are auto-calculated parameters *****************
     cuda_devices=$(seq -s ',' $start_gpu_index $(($start_gpu_index + $nodes - 1)))
     export CUDA_VISIBLE_DEVICES=$cuda_devices
-    nodes=8
+    nodes=4
     bs=$((gas * nodes))
     eval_bs=1 #$((per_device_train_batch_size * 2))
     setting=template-${template}-bs${bs}-lr${lr}-gas${gas}
@@ -34,39 +32,42 @@ for model in "${models[@]}"; do
     echo ${CUDA_VISIBLE_DEVICES}
     # make sure you want to do the deletion  rm -rf $OUTPUT_DIR
     # ************************************************************************************
-    export OUTPUT_DIR=$WORK/Code/checkpoints/attribution_models/${model}-${dataset_version}-${setting}
+    export OUTPUT_DIR=$WORK/Code/checkpoints/attribution_models/T5-batchPos-${dataset_version}-${setting}
     #rm -rf $OUTPUT_DIR
     # ************************************************************************************
 
     export WANDB_NAME=${model}_${setting}_dataset_${dataset_version}_${current_time}
 
     # # train         --evaluation_strategy "no" \ --cache_dir ${cche_dir}  --generation_max_length 128 \ --generation_num_beams 1 \
-    # torchrun --nproc_per_node ${nodes} --master-port ${master_port} ../src/train/autoais_train.py \
-    #     --model_name_or_path $model \
-    #     --data_path AttributionBench \
-    #     --template ${template} \
-    #     --template_path ../src/prompts.json \
-    #     --dataset_version ${dataset_version} \
-    #     --output_dir $OUTPUT_DIR \
-    #     --num_train_epochs $num_train_epoches \
-    #     --per_device_train_batch_size $per_device_train_batch_size \
-    #     --per_device_eval_batch_size ${eval_bs} \
-    #     --gradient_accumulation_steps ${gas} \
-    #     --save_total_limit 1 \
-    #     --eval_strategy "no"\
-    #     --save_strategy "no" \
-    #     --save_only_model True \
-    #     --logging_steps 10 \
-    #     --learning_rate $lr \
-    #     --weight_decay 0. \
-    #     --warmup_ratio 0.03 \
-    #     --predict_with_generate True \
-    #     --lr_scheduler_type "cosine" \
-    #     --bf16 True \
-    #     --tf32 True \
-    #     --report_to wandb \
-    #     --fsdp 'full_shard auto_wrap' \
-    #     --fsdp_transformer_layer_cls_to_wrap 'T5Block'\
+    torchrun --nproc_per_node ${nodes} --master-port ${master_port} ../src/train/autoais_train_contv2.py \
+        --model_name_or_path $model \
+        --data_path AttributionBench \
+        --template ${template} \
+        --template_path ../src/prompts.json \
+        --dataset_version ${dataset_version} \
+        --output_dir $OUTPUT_DIR \
+        --num_train_epochs $num_train_epoches \
+        --per_device_train_batch_size $per_device_train_batch_size \
+        --per_device_eval_batch_size ${eval_bs} \
+        --gradient_accumulation_steps ${gas} \
+        --contrastive_weight 0.1 \
+        --classification_weight 1.0 \
+        --use_decoder_embedding True\
+        --save_total_limit 1 \
+        --eval_strategy "no"\
+        --save_strategy "no" \
+        --save_only_model True \
+        --logging_steps 10 \
+        --learning_rate $lr \
+        --weight_decay 0. \
+        --warmup_ratio 0.03 \
+        --predict_with_generate True \
+        --lr_scheduler_type "cosine" \
+        --bf16 True \
+        --tf32 True \
+        --report_to wandb \
+        --fsdp 'full_shard auto_wrap' \
+        --fsdp_transformer_layer_cls_to_wrap 'T5Block'\
 
     # inference
     python ../src/inference/run_inference.py \

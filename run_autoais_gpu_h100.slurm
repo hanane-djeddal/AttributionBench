@@ -21,7 +21,6 @@ module load pytorch-gpu/py3/2.8.0
 export HF_HOME=$WORK/.cache/huggingface
 export WANDB_MODE=offline
 
-export PYTHONPATH=$WORK/.local/lib/python3.12/site-packages:$PYTHONPATH
 
 
 

@@ -292,6 +292,13 @@ class HelloWord:
             #         trust_remote_code=True,
             #         #enable_lora=True,
             #     )
+        else:
+            print("Contrastive architectures:",architectures)
+            self.only_decoder = False
+            self.model = T5ForConditionalGeneration.from_pretrained(
+                model_name, device_map="auto"
+            )
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model.eval()
         gen_kwargs = {
             "pad_token_id": self.tokenizer.pad_token_id,

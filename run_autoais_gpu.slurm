@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=a100_inference_bench #LONGbench_train_autoaisall
+#SBATCH --job-name=a100_train_error_optimtrueshuffled #LONGbench_train_autoaisall
 #SBATCH --output=jz_%j_%x.out
 #SBATCH --error=errjz_%j_%x.out
-#SBATCH --gres=gpu:4
+#SBATCH --gres=gpu:8
 #SBATCH --ntasks-per-node=1
 #SBATCH --nodes=1
 #SBATCH --hint=nomultithread
