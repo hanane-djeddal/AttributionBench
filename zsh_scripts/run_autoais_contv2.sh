@@ -12,27 +12,31 @@ for model in "${models[@]}"; do
     # ***************** Set parameters here *****************
     dataset_version=attributionBench_hardpos_augmentedQwen30B_allerrors_contrastive 
     template=base_c_e
-    lr=3e-5  #1e-5
-    num_train_epoches=2
+    lr=5e-5 #3e-5  #1e-5 #5e-5 #
+    cont_weight=1.0 #0.5 #0.1  #1e-5  0.5 #
+    classif_weight=1.0
+    num_train_epoches=10
     start_gpu_index=0
     master_port=11111
     per_device_train_batch_size=1
     gas=4
     nodes=4
+    num_neg=8
+    num_pos=8
     cche_dir=$WORK/.cache/huggingface
     # ***************** The followings are auto-calculated parameters *****************
     cuda_devices=$(seq -s ',' $start_gpu_index $(($start_gpu_index + $nodes - 1)))
     export CUDA_VISIBLE_DEVICES=$cuda_devices
     nodes=4
     bs=$((gas * nodes))
-    eval_bs=1 #$((per_device_train_batch_size * 2))
-    setting=template-${template}-bs${bs}-lr${lr}-gas${gas}
+    eval_bs=1 #$((per_device_train_batch_size * 2)) #template-${template}
+    setting=bs${bs}-lr${lr}-gas${gas}-contW${cont_weight}-classifW${classif_weight}-Ep${num_train_epoches}-nneg${num_neg}-npos${num_pos}
     current_time=$(date +"%Y-%m-%d-%H:%M:%S")
 
     echo ${CUDA_VISIBLE_DEVICES}
     # make sure you want to do the deletion  rm -rf $OUTPUT_DIR
     # ************************************************************************************
-    export OUTPUT_DIR=$WORK/Code/checkpoints/attribution_models/T5-batchPos-${dataset_version}-${setting}
+    export OUTPUT_DIR=../models/attribution_models/T5-use_InbatchNegatives-${dataset_version}-${setting}
     #rm -rf $OUTPUT_DIR
     # ************************************************************************************
 
@@ -50,8 +54,10 @@ for model in "${models[@]}"; do
         --per_device_train_batch_size $per_device_train_batch_size \
         --per_device_eval_batch_size ${eval_bs} \
         --gradient_accumulation_steps ${gas} \
-        --contrastive_weight 0.1 \
-        --classification_weight 1.0 \
+        --contrastive_weight ${cont_weight} \
+        --classification_weight ${classif_weight} \
+        --num_positives ${num_pos}\
+        --num_negatives ${num_neg}\
         --use_decoder_embedding True\
         --save_total_limit 1 \
         --eval_strategy "no"\

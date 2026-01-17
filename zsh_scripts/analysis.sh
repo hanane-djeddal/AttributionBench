@@ -1,6 +1,6 @@
 #!/bin/bash
 
-dataset_versions=("attributionBench_hardpos_augmentedQwen30B_error_trueOptimshuffled")
+dataset_versions=("attributionBench_hardpos_augmentedQwen30B_error_trueOptimshuffled" attributionBench_hardpos_augmentedQwen30B_allerrors_contrastive)
 #"attributionBench_hardpos_augmentedQwen30B_allerror_shuffled" "attributionBench_hardpos_augmentedQwen30B_allerror" "attributionBench_hardpos_augmentedQwen30B_allerror_mixed_alltrain")
 #"attributionBench_augmentedv1_shuffled_mixedalltrainfiltered2" "AttributionBench" "attributionBench_contrastive1neg_mismatch")
 # dataset_versions=("subset_balanced" "overall_balanced" "not_balanced" "full_data")

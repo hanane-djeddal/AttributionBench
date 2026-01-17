@@ -196,7 +196,9 @@ def main(args):
     file_name, file_extension = os.path.splitext(args.data_path)
     data_path = f"{file_name}_analysis{file_extension}"
     with open(data_path, "w") as f:
+        avg=[]
         for key in d:
+            avg.append( round(100 * d[key]["f1"], 1))
             json.dump(
                 {
                     "src_dataset": key,
@@ -216,6 +218,14 @@ def main(args):
                 f,
             )
             f.write("\n")
+        f1_avg=sum(avg)/len(avg) if len(avg) else 0.0 
+        json.dump(
+            {
+                "f1_avg": round( f1_avg, 1),
+            },
+            f,
+        )
+        f.write("\n")
 
 
 if __name__ == "__main__":

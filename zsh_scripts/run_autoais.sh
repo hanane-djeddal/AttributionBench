@@ -34,7 +34,7 @@ for model in "${models[@]}"; do
     echo ${CUDA_VISIBLE_DEVICES}
     # make sure you want to do the deletion  rm -rf $OUTPUT_DIR
     # ************************************************************************************
-    export OUTPUT_DIR=$WORK/Code/checkpoints/attribution_models/${model}-${dataset_version}-${setting}
+    export OUTPUT_DIR=../models/attribution_models/${model}-${dataset_version}-${setting}
     #rm -rf $OUTPUT_DIR
     # ************************************************************************************
 

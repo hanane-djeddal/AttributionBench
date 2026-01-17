@@ -41,8 +41,12 @@ class DataArguments:
     template: str = field(default="base_c_e")
     template_path: str = field(default="src/train/template.json")
     use_contrastive: bool = field(default=True, metadata={"help": "Use contrastive learning"})
-    num_positives: int = field(default=2, metadata={"help": "Number of positives to sample per anchor"})
-    num_negatives: int = field(default=3, metadata={"help": "Number of negatives to sample per anchor"})
+    num_positives: int = field(default=8, metadata={"help": "Number of positives to sample per anchor"})
+    num_negatives: int = field(default=8, metadata={"help": "Number of negatives to sample per anchor"})
+    include_anchor_only: bool = field(
+        default=True, 
+        metadata={"help": "Include examples with no positives/negatives (anchor-only)"}
+    )
 
 @dataclass
 class Seq2SeqTrainingArguments(transformers.Seq2SeqTrainingArguments):
@@ -941,6 +945,7 @@ def train():
     print(f"GPU memory: {torch.cuda.memory_allocated()/1e9:.2f} GB")
     trainer.save_state()
     trainer.save_model(output_dir=training_args.output_dir)
+    print(f"Model Saved to : {training_args.output_dir}")
 
 
 if __name__ == "__main__":

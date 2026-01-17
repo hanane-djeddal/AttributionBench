@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=h100_bench_train_autoaisall_contrastinWITHOUTbatchPos #1marginloss3K #augmented
+#SBATCH --job-name=h100_bench_train_autoaisall_contrastInBNeg_allnegallpose4 #s3 #1marginloss3K #augmented
 #SBATCH --output=jz_%j_%x.out
 #SBATCH --error=errjz_%j_%x.out
 #SBATCH --gres=gpu:4
@@ -8,7 +8,7 @@
 #SBATCH --hint=nomultithread
 #SBATCH --time=1:50:00
 #SBATCH --constraint=h100
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=30
 #SBATCH --account=fiz@h100 ##
 #SBATCH --qos=qos_gpu_h100-dev
 
@@ -32,3 +32,4 @@ cd /lustre/fswork/projects/rech/fiz/udo61qq/Code/AttributionBench/zsh_scripts/
 #sh run_llama2_7b.sh 
 
 sh run_autoais_contv2.sh
+sh analysis.sh

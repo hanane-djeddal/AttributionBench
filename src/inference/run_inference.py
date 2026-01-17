@@ -256,6 +256,8 @@ class HelloWord:
         architectures = self.config.architectures[0]
         self.is_llama = "llama" in architectures.lower()
 
+        print("architectures:",architectures)
+
         self.is_qwen = "qwen" in architectures.lower() #"llama" 
 
         if "Conditional" in architectures:
@@ -293,7 +295,6 @@ class HelloWord:
             #         #enable_lora=True,
             #     )
         else:
-            print("Contrastive architectures:",architectures)
             self.only_decoder = False
             self.model = T5ForConditionalGeneration.from_pretrained(
                 model_name, device_map="auto"
@@ -733,9 +734,10 @@ def main(args):
     # pdb.set_trace()
     for split in args.split:
         pbar.update(1)
+        last_model_name=os.path.basename(args.model_name)
         output_path = os.path.join(
             args.output_dir,
-            args.method + f"{remove_slash(args.model_name)}" + f"_{split}" + ".json",
+            args.method + f"{remove_slash(last_model_name)}" + f"_{split}" + ".json",
         )
 
         Path(output_path).parent.mkdir(exist_ok=True, parents=True)
