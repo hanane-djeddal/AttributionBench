@@ -12,6 +12,7 @@ from pathlib import Path
 import os
 import json
 import logging
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -29,8 +30,8 @@ import numpy as np
 import hashlib
 from argparse import ArgumentParser
 import sys
-from vllm import LLM, SamplingParams
-from vllm.lora.request import LoRARequest
+#from vllm import LLM, SamplingParams
+#from vllm.lora.request import LoRARequest
 
 sys.path.append(".")
 import pdb
@@ -741,26 +742,49 @@ def main(args):
         )
 
         Path(output_path).parent.mkdir(exist_ok=True, parents=True)
-
-        # datas = load_dataset(args.data_path, split=split)
-        # pdb.set_trace()
-        features = Features(
-            {
-                "question": Value("string"),  # 字符串字段
-                "claim": Value("string"),  # 字符串字段
-                "claim_raw_string": Value("string"),  # 字符串字段
-                "response": Value("string"),  # 字符串字段
-                "references": Sequence(Value("string")),  # 字符串字段
-                "citation_links": Sequence(Value("string")),  # 字符串字段
-                "webpage_references": Sequence(Value("string")),  # 字符串字段
-                "attribution_label": Value("string"),  # 字符串字段
-                "src_dataset": Value("string"),  # 字符串字段
-                "id": Value("string"),  # 字符串字段
-            }
-        )
-        data_path=os.environ['WORK']+ "/AttributionBench"
-        data = datasets.load_from_disk(data_path)
-        datas=data[split]
+        if args.custom_data:
+            if args.custom_data.endswith(".csv"):
+                df = pd.read_csv(
+                        args.custom_data,
+                        converters={
+                            "qa_pairs": eval,
+                            "wikipages": eval,
+                        "annotations": eval,
+                        "docs": eval,
+                    },
+                )
+                data = df.to_dict("records")
+            else:
+                with open(args.custom_data) as f:
+                    data_with_config = json.load(f)
+                data = data_with_config["data"]
+                if "params" in data_with_config.keys():
+                    params= data_with_config["params"]
+                temp_df = pd.DataFrame.from_dict(data)
+                df_gen=temp_df[temp_df["example_type"]=="generated"]
+                og_data = temp_df[temp_df["example_type"]=="hard_positive"]
+                datas=datasets.Dataset.from_pandas(df_gen)  #.to_dict("records")
+                og_data=og_data.to_dict("records")
+        else:
+            # datas = load_dataset(args.data_path, split=split)
+            # pdb.set_trace()
+            features = Features(
+                {
+                    "question": Value("string"),  # 字符串字段
+                    "claim": Value("string"),  # 字符串字段
+                    "claim_raw_string": Value("string"),  # 字符串字段
+                    "response": Value("string"),  # 字符串字段
+                    "references": Sequence(Value("string")),  # 字符串字段
+                    "citation_links": Sequence(Value("string")),  # 字符串字段
+                    "webpage_references": Sequence(Value("string")),  # 字符串字段
+                    "attribution_label": Value("string"),  # 字符串字段
+                    "src_dataset": Value("string"),  # 字符串字段
+                    "id": Value("string"),  # 字符串字段
+                }
+            )
+            data_path=os.environ['WORK']+ "/AttributionBench"
+            data = datasets.load_from_disk(data_path)
+            datas=data[split]
        
         # datas = load_dataset(
         #     args.data_path, name=args.dataset_version, split=split, features=features
@@ -780,6 +804,8 @@ def main(args):
         raw_labels = datas[label_name]
         src_datasets = datas["src_dataset"]
         postprocess_labels = parse_prediction(raw_labels, args.method)
+        if args.custom_data:
+            error_type=datas["error_type"]
 
         print("before process_data map", len(datas))
         processed_datas = datas.map(
@@ -815,32 +841,62 @@ def main(args):
 
         logger.info("processed output")
         logger.info(outputs)
-
-        with open(output_path, "w") as f:
-            for (
-                raw_label,
-                postprocess_label,
-                raw_output,
-                src_dataset,
-                input_text,
-            ) in zip(
-                raw_labels,
-                postprocess_labels,
-                outputs["raw_outputs"],
-                src_datasets,
-                input_datas,
-            ):
-                json.dump(
-                    dict(
-                        raw_label=raw_label,
-                        postprocess_label=postprocess_label,
-                        raw_output=raw_output,
-                        src_dataset=src_dataset,
-                        input_text=input_text,
-                    ),
-                    f,
-                )
-                f.write("\n")
+        if args.custom_data:
+            #outputs= outputs+og_data
+            with open(output_path, "w") as f:
+                for (
+                    raw_label,
+                    postprocess_label,
+                    raw_output,
+                    src_dataset,
+                    input_text,
+                    error_type
+                ) in zip(
+                    raw_labels,
+                    postprocess_labels,
+                    outputs["raw_outputs"],
+                    src_datasets,
+                    input_datas,
+                    error_type
+                ):
+                    json.dump(
+                        dict(
+                            raw_label=raw_label,
+                            postprocess_label=postprocess_label,
+                            raw_output=raw_output,
+                            src_dataset=src_dataset,
+                            input_text=input_text,
+                            error_type=error_type
+                        ),
+                        f,
+                    )
+                    f.write("\n")
+        else:
+            with open(output_path, "w") as f:
+                for (
+                    raw_label,
+                    postprocess_label,
+                    raw_output,
+                    src_dataset,
+                    input_text,
+                ) in zip(
+                    raw_labels,
+                    postprocess_labels,
+                    outputs["raw_outputs"],
+                    src_datasets,
+                    input_datas,
+                ):
+                    json.dump(
+                        dict(
+                            raw_label=raw_label,
+                            postprocess_label=postprocess_label,
+                            raw_output=raw_output,
+                            src_dataset=src_dataset,
+                            input_text=input_text,
+                        ),
+                        f,
+                    )
+                    f.write("\n")
 
 
 if __name__ == "__main__":
@@ -850,6 +906,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--model_name", default="", type=str)
     parser.add_argument("--data_path", default="AttributionBench")
+    parser.add_argument("--custom_data", default=None)
     parser.add_argument("--dataset_version", default="v2.1")
     parser.add_argument("--output_dir", default="./inference_results")
     parser.add_argument("--bs", default=2, type=int)

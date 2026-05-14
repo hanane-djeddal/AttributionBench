@@ -1,16 +1,15 @@
 #!/bin/bash
-#SBATCH --job-name=h100_bench_train_autoaisall_contrastInBNeg_allnegallpose4 #s3 #1marginloss3K #augmented
+#SBATCH --job-name=h100_bench_baseline_inbatchneg_only ##1lrtrain_autoaisall_contrastivetauE3#1marginloss3K #augmented
 #SBATCH --output=jz_%j_%x.out
 #SBATCH --error=errjz_%j_%x.out
 #SBATCH --gres=gpu:4
 #SBATCH --ntasks-per-node=1
 #SBATCH --nodes=1
 #SBATCH --hint=nomultithread
-#SBATCH --time=1:50:00
+#SBATCH --time=3:50:00
 #SBATCH --constraint=h100
 #SBATCH --cpus-per-task=30
-#SBATCH --account=fiz@h100 ##
-#SBATCH --qos=qos_gpu_h100-dev
+#SBATCH --account=fiz@h100 ###SBATCH --qos=qos_gpu_h100-dev
 
 export HF_DATASETS_OFFLINE=1
 export HF_EVALUATE_OFFLINE=1
@@ -19,9 +18,10 @@ export TRANSFORMERS_OFFLINE=1
 module purge
 module load arch/h100
 module load pytorch-gpu/py3/2.8.0
-#cd $WORK/Code/alignment-handbook/
+cd $WORK/Code/alignment-handbook/
 #source handbook/bin/activate
 
+source handbook/bin/activate
 export HF_HOME=$WORK/.cache/huggingface
 export WANDB_MODE=offline
 
@@ -31,5 +31,10 @@ cd /lustre/fswork/projects/rech/fiz/udo61qq/Code/AttributionBench/zsh_scripts/
 #CUDA_VISIBLE_DEVICES=0,1,2,3 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_EVALUATE_OFFLINE=1 WANDB_MODE=offline python src/train/test_contrastive.py #_modelwise.py #sh run_autoais.sh
 #sh run_llama2_7b.sh 
 
-sh run_autoais_contv2.sh
-sh analysis.sh
+#sh run_autoais_contv2.sh
+
+
+#sh run_autoais_contv2_16bs.sh
+#sh analysis.sh
+
+sh run_autoais_cont_inbatchneg.sh

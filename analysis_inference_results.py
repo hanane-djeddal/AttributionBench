@@ -119,20 +119,36 @@ def main(args):
             if parsed_prediction == -1:
                 parsed_prediction = 0 if line["postprocess_label"] == 1 else 1
 
-            d[line["src_dataset"]]["labels"].append(line["postprocess_label"])
-            d[line["src_dataset"]]["preds"].append(parsed_prediction)
-            all_labels.append(line["postprocess_label"])
-            all_preds.append(parsed_prediction)
-            if line["postprocess_label"] == 0:
-                all_labels_neg.append(line["postprocess_label"])
-                all_preds_neg.append(parsed_prediction)
-                d[line["src_dataset"]]["labels_neg"].append(line["postprocess_label"])
-                d[line["src_dataset"]]["preds_neg"].append(parsed_prediction)
-            if line["postprocess_label"] == 1:
-                all_labels_pos.append(line["postprocess_label"])
-                all_preds_pos.append(parsed_prediction)
-                d[line["src_dataset"]]["labels_pos"].append(line["postprocess_label"])
-                d[line["src_dataset"]]["preds_pos"].append(parsed_prediction)
+            if args.error_type:
+                d[line["error_type"]]["labels"].append(line["postprocess_label"])
+                d[line["error_type"]]["preds"].append(parsed_prediction)
+                all_labels.append(line["postprocess_label"])
+                all_preds.append(parsed_prediction)
+                if line["postprocess_label"] == 0:
+                    all_labels_neg.append(line["postprocess_label"])
+                    all_preds_neg.append(parsed_prediction)
+                    d[line["error_type"]]["labels_neg"].append(line["postprocess_label"])
+                    d[line["error_type"]]["preds_neg"].append(parsed_prediction)
+                if line["postprocess_label"] == 1:
+                    all_labels_pos.append(line["postprocess_label"])
+                    all_preds_pos.append(parsed_prediction)
+                    d[line["error_type"]]["labels_pos"].append(line["postprocess_label"])
+                    d[line["error_type"]]["preds_pos"].append(parsed_prediction)
+            else:
+                d[line["src_dataset"]]["labels"].append(line["postprocess_label"])
+                d[line["src_dataset"]]["preds"].append(parsed_prediction)
+                all_labels.append(line["postprocess_label"])
+                all_preds.append(parsed_prediction)
+                if line["postprocess_label"] == 0:
+                    all_labels_neg.append(line["postprocess_label"])
+                    all_preds_neg.append(parsed_prediction)
+                    d[line["src_dataset"]]["labels_neg"].append(line["postprocess_label"])
+                    d[line["src_dataset"]]["preds_neg"].append(parsed_prediction)
+                if line["postprocess_label"] == 1:
+                    all_labels_pos.append(line["postprocess_label"])
+                    all_preds_pos.append(parsed_prediction)
+                    d[line["src_dataset"]]["labels_pos"].append(line["postprocess_label"])
+                    d[line["src_dataset"]]["preds_pos"].append(parsed_prediction)
 
     for key in d:
         d[key]["acc"] = cal_acc(d[key]["labels"], d[key]["preds"])
@@ -198,10 +214,15 @@ def main(args):
     with open(data_path, "w") as f:
         avg=[]
         for key in d:
-            avg.append( round(100 * d[key]["f1"], 1))
+            if key=='all':
+                f1_avg=sum(avg)/len(avg) if len(avg) else 0.0 
+            else:
+                avg.append( round(100 * d[key]["f1"], 1))
+                f1_avg= 100 * d[key]["f1"]
             json.dump(
                 {
                     "src_dataset": key,
+                    'f1_avg':round( f1_avg, 1),
                     "f1": round(100 * d[key]["f1"], 1),
                     "acc": round(100 * d[key]["acc"], 1),
                     "precision": round(100 * d[key]["precision"], 1),
@@ -218,14 +239,6 @@ def main(args):
                 f,
             )
             f.write("\n")
-        f1_avg=sum(avg)/len(avg) if len(avg) else 0.0 
-        json.dump(
-            {
-                "f1_avg": round( f1_avg, 1),
-            },
-            f,
-        )
-        f.write("\n")
 
 
 if __name__ == "__main__":
@@ -233,6 +246,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_path", default="", type=str)
     parser.add_argument("--relax", action="store_true")
     parser.add_argument("--w_rationale", action="store_true")
+    parser.add_argument("--error_type", action="store_true")
     parser.add_argument(
         "--method", choices=["autoais", "attrscore", "attrbench", "gpt4"]
     )

@@ -23,9 +23,11 @@ DEFAULT_PAD_TOKEN = "<pad>"
 DEFAULT_EOS_TOKEN = "</s>"
 DEFAULT_UNK_TOKEN = "<unk>"
 
+T5_TYPES=["claim_erronous_change","claim_numerical_mismatch","modify_passage-add_relevant_to_claim","claim_combine_facts","claim_add_to_the_claim_contradicting_info","modify_passage-add_contradiction","modify_passage-add_conflicting_sources","claim_infer_claim","claim_over_infer_claim"]
+
 @dataclass
 class ModelArguments:
-    model_name_or_path: Optional[str] = field(default="google/flan-t5-xl")
+    model_name_or_path: Optional[str] = field(default="google/t5_xxl_true_nli_mixture")
 
 @dataclass
 class DataArguments:
@@ -46,6 +48,10 @@ class DataArguments:
     include_anchor_only: bool = field(
         default=True, 
         metadata={"help": "Include examples with no positives/negatives (anchor-only)"}
+    )    
+    filter_error_types: bool = field(
+        default=False, 
+        metadata={"help": "Filter error types only leaving select ones"}
     )
 
 @dataclass
@@ -140,6 +146,94 @@ class Seq2SeqTrainingArguments(transformers.Seq2SeqTrainingArguments):
         
 #         return total_loss
 
+
+
+# def supervised_contrastive_loss(
+#     self,
+#     embeds,       # [B, D]
+#     labels,       # [B]
+#     pos_embeds,   # [B, N_pos, D]
+#     neg_embeds,   # [B, N_neg, D]
+#     pos_mask,     # [B, N_pos] bool — True where positive is real
+#     neg_mask,     # [B, N_neg] bool — True where negative is real
+#     temperature=0.07
+# ):
+#     device = embeds.device
+#     batch_size = embeds.shape[0]
+
+#     if batch_size < 2:
+#         return torch.tensor(0.0, device=device, requires_grad=True)
+
+#     # Normalize
+#     embeds     = F.normalize(embeds, dim=-1)      # [B, D]
+#     pos_embeds = F.normalize(pos_embeds, dim=-1)  # [B, N_pos, D]
+#     neg_embeds = F.normalize(neg_embeds, dim=-1)  # [B, N_neg, D]
+
+#     # Explicit pos/neg similarities, padding masked to -inf
+#     anchor_exp = embeds.unsqueeze(1)                                           # [B, 1, D]
+#     pos_sim = (anchor_exp * pos_embeds).sum(dim=-1) / temperature              # [B, N_pos]
+#     neg_sim = (anchor_exp * neg_embeds).sum(dim=-1) / temperature              # [B, N_neg]
+#     pos_sim = pos_sim.masked_fill(~pos_mask, float('-inf'))
+#     neg_sim = neg_sim.masked_fill(~neg_mask, float('-inf'))
+
+#     # In-batch similarities
+#     inbatch_sim      = torch.matmul(embeds, embeds.T) / temperature            # [B, B]
+#     self_mask        = torch.eye(batch_size, dtype=torch.bool, device=device)
+#     inbatch_pos_mask = (labels.unsqueeze(1) == labels.unsqueeze(0)) & ~self_mask  # [B, B]
+#     inbatch_neg_mask = (labels.unsqueeze(1) != labels.unsqueeze(0))               # [B, B]
+#     inbatch_pos_sim  = inbatch_sim.masked_fill(~inbatch_pos_mask, float('-inf'))
+#     inbatch_neg_sim  = inbatch_sim.masked_fill(~inbatch_neg_mask, float('-inf'))
+
+#     # Per-anchor availability flags
+#     has_explicit_pos = pos_mask.any(dim=1)           # [B]
+#     has_explicit_neg = neg_mask.any(dim=1)           # [B]
+#     has_inbatch_pos  = inbatch_pos_mask.any(dim=1)   # [B]
+#     has_inbatch_neg  = inbatch_neg_mask.any(dim=1)   # [B]
+
+#     def supcon_loss(p_sim, n_sim, p_mask):
+#         """
+#         SupCon loss for a subset of anchors.
+#         p_sim: [B', N_pos] positive similarities (-inf for invalid)
+#         n_sim: [B', N_neg] negative similarities (-inf for invalid)
+#         p_mask: [B', N_pos] bool mask for valid positives
+#         """
+#         all_sim   = torch.cat([p_sim, n_sim], dim=1)     # [B', N_pos+N_neg]
+#         log_denom = torch.logsumexp(all_sim, dim=1)      # [B']
+
+#         # Log-prob for each positive slot
+#         log_prob = p_sim - log_denom.unsqueeze(1)        # [B', N_pos]
+#         log_prob = log_prob.masked_fill(~p_mask, 0.0)   # zero out invalid slots
+
+#         n_pos = p_mask.sum(dim=1).float()                # [B']
+#         return -(log_prob.sum(dim=1) / n_pos).mean()
+
+#     losses = []
+
+#     # Case 1: explicit pos + explicit neg → full SupCon
+#     mask1 = has_explicit_pos & has_explicit_neg
+#     if mask1.any():
+#         losses.append(supcon_loss(pos_sim[mask1], neg_sim[mask1], pos_mask[mask1]))
+
+#     # Case 2: explicit neg only → repulsion loss
+#     mask2 = ~has_explicit_pos & has_explicit_neg
+#     if mask2.any():
+#         losses.append(torch.logsumexp(neg_sim[mask2], dim=1).mean())
+
+#     # Case 3: explicit pos only → attraction + in-batch negatives
+#     mask3 = has_explicit_pos & ~has_explicit_neg & has_inbatch_neg
+#     if mask3.any():
+#         losses.append(supcon_loss(pos_sim[mask3], inbatch_neg_sim[mask3], pos_mask[mask3]))
+
+#     # Case 4: neither → full in-batch SupCon
+#     mask4 = ~has_explicit_pos & ~has_explicit_neg & has_inbatch_pos & has_inbatch_neg
+#     if mask4.any():
+#         losses.append(supcon_loss(inbatch_pos_sim[mask4], inbatch_neg_sim[mask4], inbatch_pos_mask[mask4]))
+
+#     if not losses:
+#         return torch.tensor(0.0, device=device, requires_grad=True)
+
+#     return torch.stack(losses).mean()
+
 class SupervisedContrastiveLoss(nn.Module):
     """
     Supervised Contrastive Loss for T5 hidden states.
@@ -150,6 +244,7 @@ class SupervisedContrastiveLoss(nn.Module):
         super().__init__()
         self.temperature = temperature
         self.use_in_batch_negatives = use_in_batch_negatives
+        print("Setting temp to:", self.temperature )
     
     def forward(self, anchor_embeds, positive_embeds, negative_embeds=None,
                 anchor_labels=None, all_batch_embeds=None, all_batch_labels=None):
@@ -321,6 +416,8 @@ class ContrastiveDataset(Dataset):
         self.dataset_path = data_args.data_path
 
         self.use_contrastive = data_args.use_contrastive and split == "train"
+
+        self.filter_error_types = data_args.filter_error_types 
         
         # Load dataset
         self.data = self.load_dataset(split, data_args)
@@ -408,7 +505,10 @@ class ContrastiveDataset(Dataset):
                 if example["response"] and example["response"] not in ["nan", "", None]
                 else ""
             )
-            documents_concatenation = "\n\n\n".join(example["references"])
+            if "references" in example.keys() and len(example["references"]):
+                documents_concatenation = "\n\n\n".join(example["references"])
+            else:
+                print("Empty references",example)
 
             if have_question and have_response:
                 input_template = "### Input:\nQuestion: {}\n\nClaim: {}\n\nResponse: {}\n\nReference: {}\n\n### Output:"
@@ -498,12 +598,55 @@ class ContrastiveDataset(Dataset):
                 "attention_mask": attention_mask,
                 "labels": labels
             }
+
+        # Check if this is an anchor-only example (no positives/negatives)
+
+        has_positives = "positives" in example and len(example["positives"]) > 0
+        has_negatives = "negatives" in example and len(example["negatives"]) > 0
+        is_anchor_only = not has_positives and not has_negatives
+        
+        # Handle different example types
+        if is_anchor_only:
+            # Anchor-only: return with empty pos/neg for classification-only training
+            anchor = example['anchor'] if "anchor" in example else example
+            anchor_text = self.process_function(anchor)
+            input_ids, attention_mask = self.tokenize_example(anchor_text)
+            
+            label = "1" if str(anchor.get('attribution_label', '')) == "attributable" else "0"
+            labels = self.tokenize_example(label, is_target=True)
+            
+            return {
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
+                "labels": labels,
+                "pos_input_ids": [],  # Empty positives
+                "pos_attention_masks": [],
+                "neg_input_ids": [],  # Empty negatives
+                "neg_attention_masks": [],
+                "is_anchor_only": True  # Flag for trainer
+            }
         
         # Contrastive mode: return anchor + sampled positives + negatives
-        anchor = example["anchor"]
+        anchor = example["anchor"] if "anchor" in example else example
         positives = example["positives"]
         negatives = example["negatives"]
         
+
+        if self.filter_error_types: 
+            print("Filtering Error types and leaving only", T5_TYPES)
+            filtered_neg=[]
+            filtered_pos=[]
+            for n in negatives:
+                if n["error_type"] in T5_TYPES:
+                    filtered_neg.append(n)
+            for p in positives:
+                if p["error_type"] in T5_TYPES:
+                    filtered_pos.append(p)
+            positives=filtered_pos
+            print("Filtering Positives", positives)
+            negatives=filtered_neg
+            print("Filtering negatives", negatives)
+
         # Sample subset
         num_pos = min(self.data_args.num_positives, len(positives))
         num_neg = min(self.data_args.num_negatives, len(negatives))
@@ -544,47 +687,17 @@ class ContrastiveDataset(Dataset):
             "pos_attention_masks": pos_attention_masks,
             "neg_input_ids": neg_input_ids,
             "neg_attention_masks": neg_attention_masks,
+            "is_anchor_only": False
         }
-
 
 @dataclass
 class ContrastiveDataCollator:
-    """Collator for contrastive learning batches."""
+    """Collator for contrastive learning batches. Handles variable-length pos/neg lists."""
     tokenizer: transformers.PreTrainedTokenizer
     use_contrastive: bool = True
     
     def __call__(self, instances: List[Dict]) -> Dict[str, torch.Tensor]:
-        if len(instances):
-            if "pos_input_ids" not in instances[0].keys():
-                contrastive_data= False
-            else:
-                contrastive_data= True
-        if not self.use_contrastive or  not contrastive_data:
-            # Regular collation
-            input_ids = [inst["input_ids"] for inst in instances]
-            attention_masks = [inst["attention_mask"] for inst in instances]
-            labels = [inst["labels"] for inst in instances]
-            
-            input_ids = torch.nn.utils.rnn.pad_sequence(
-                input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id
-            )
-            attention_masks = torch.nn.utils.rnn.pad_sequence(
-                attention_masks, batch_first=True, padding_value=0
-            )
-            labels = torch.nn.utils.rnn.pad_sequence(
-                labels, batch_first=True, padding_value=IGNORE_INDEX
-            )
-            
-            return {
-                "input_ids": input_ids,
-                "attention_mask": attention_masks,
-                "labels": labels
-            }
-        
-        # Contrastive collation
-        batch_size = len(instances)
-        
-        # Anchors
+        # Pad anchors
         anchor_input_ids = [inst["input_ids"] for inst in instances]
         anchor_attention_masks = [inst["attention_mask"] for inst in instances]
         anchor_labels = [inst["labels"] for inst in instances]
@@ -599,21 +712,44 @@ class ContrastiveDataCollator:
             anchor_labels, batch_first=True, padding_value=IGNORE_INDEX
         )
         
-        # Positives: flatten, pad, then reshape
+        # If not using contrastive or no positives/negatives in batch, return simple batch
+        if not self.use_contrastive:
+            return {
+                "input_ids": anchor_input_ids,
+                "attention_mask": anchor_attention_masks,
+                "labels": anchor_labels
+            }
+        
+        # Check if any instance has contrastive data
+        has_contrastive = any(
+            len(inst.get("pos_input_ids", [])) > 0 or len(inst.get("neg_input_ids", [])) > 0
+            for inst in instances
+        )
+        
+        if not has_contrastive:
+            # All anchor-only: return classification-only batch
+            return {
+                "input_ids": anchor_input_ids,
+                "attention_mask": anchor_attention_masks,
+                "labels": anchor_labels
+            }
+        
+        # Pad positives
         all_pos_input_ids = []
         all_pos_attention_masks = []
         pos_counts = []
         
         for inst in instances:
-            pos_ids = inst["pos_input_ids"]
-            pos_masks = inst["pos_attention_masks"]
+            pos_ids = inst.get("pos_input_ids", [])
+            pos_masks = inst.get("pos_attention_masks", [])
             pos_counts.append(len(pos_ids))
             all_pos_input_ids.extend(pos_ids)
             all_pos_attention_masks.extend(pos_masks)
         
         max_pos = max(pos_counts) if pos_counts else 0
         
-        if len(all_pos_input_ids) > 0:
+        if max_pos > 0:
+            # Pad sequences
             all_pos_input_ids = torch.nn.utils.rnn.pad_sequence(
                 all_pos_input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id
             )
@@ -621,54 +757,59 @@ class ContrastiveDataCollator:
                 all_pos_attention_masks, batch_first=True, padding_value=0
             )
             
-            # Pad to max_pos per batch item
+            # Reshape to [batch, max_pos, seq_len]
             pos_input_ids_batched = []
             pos_attention_masks_batched = []
             idx = 0
             for count in pos_counts:
-                batch_pos_ids = all_pos_input_ids[idx:idx+count]
-                batch_pos_masks = all_pos_attention_masks[idx:idx+count]
-                
-                # Pad to max_pos
-                if count < max_pos:
-                    pad_amount = max_pos - count
-                    pad_ids = torch.full(
-                        (pad_amount, batch_pos_ids.shape[1]), 
-                        self.tokenizer.pad_token_id, 
-                        dtype=batch_pos_ids.dtype
+                if count == 0:
+                    # Dummy positives for anchor-only examples
+                    dummy_ids = torch.full(
+                        (max_pos, all_pos_input_ids.shape[1]),
+                        self.tokenizer.pad_token_id,
+                        dtype=torch.long
                     )
-                    pad_masks = torch.zeros(
-                        (pad_amount, batch_pos_masks.shape[1]), 
-                        dtype=batch_pos_masks.dtype
-                    )
-                    batch_pos_ids = torch.cat([batch_pos_ids, pad_ids], dim=0)
-                    batch_pos_masks = torch.cat([batch_pos_masks, pad_masks], dim=0)
-                
-                pos_input_ids_batched.append(batch_pos_ids)
-                pos_attention_masks_batched.append(batch_pos_masks)
-                idx += count
+                    dummy_masks = torch.zeros((max_pos, all_pos_attention_masks.shape[1]), dtype=torch.long)
+                    pos_input_ids_batched.append(dummy_ids)
+                    pos_attention_masks_batched.append(dummy_masks)
+                else:
+                    batch_pos_ids = all_pos_input_ids[idx:idx+count]
+                    batch_pos_masks = all_pos_attention_masks[idx:idx+count]
+                    
+                    if count < max_pos:
+                        # Pad to max_pos
+                        pad_amount = max_pos - count
+                        pad_ids = torch.full((pad_amount, batch_pos_ids.shape[1]), 
+                                           self.tokenizer.pad_token_id, dtype=torch.long)
+                        pad_masks = torch.zeros((pad_amount, batch_pos_masks.shape[1]), dtype=torch.long)
+                        batch_pos_ids = torch.cat([batch_pos_ids, pad_ids], dim=0)
+                        batch_pos_masks = torch.cat([batch_pos_masks, pad_masks], dim=0)
+                    
+                    pos_input_ids_batched.append(batch_pos_ids)
+                    pos_attention_masks_batched.append(batch_pos_masks)
+                    idx += count
             
-            pos_input_ids = torch.stack(pos_input_ids_batched)  # [B, max_pos, seq_len]
+            pos_input_ids = torch.stack(pos_input_ids_batched)
             pos_attention_masks = torch.stack(pos_attention_masks_batched)
         else:
             pos_input_ids = None
             pos_attention_masks = None
         
-        # Negatives: same process
+        # Pad negatives
         all_neg_input_ids = []
         all_neg_attention_masks = []
         neg_counts = []
         
         for inst in instances:
-            neg_ids = inst["neg_input_ids"]
-            neg_masks = inst["neg_attention_masks"]
+            neg_ids = inst.get("neg_input_ids", [])
+            neg_masks = inst.get("neg_attention_masks", [])
             neg_counts.append(len(neg_ids))
             all_neg_input_ids.extend(neg_ids)
             all_neg_attention_masks.extend(neg_masks)
         
         max_neg = max(neg_counts) if neg_counts else 0
         
-        if len(all_neg_input_ids) > 0:
+        if max_neg > 0:
             all_neg_input_ids = torch.nn.utils.rnn.pad_sequence(
                 all_neg_input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id
             )
@@ -680,28 +821,32 @@ class ContrastiveDataCollator:
             neg_attention_masks_batched = []
             idx = 0
             for count in neg_counts:
-                batch_neg_ids = all_neg_input_ids[idx:idx+count]
-                batch_neg_masks = all_neg_attention_masks[idx:idx+count]
-                
-                if count < max_neg:
-                    pad_amount = max_neg - count
-                    pad_ids = torch.full(
-                        (pad_amount, batch_neg_ids.shape[1]), 
-                        self.tokenizer.pad_token_id, 
-                        dtype=batch_neg_ids.dtype
+                if count == 0:
+                    dummy_ids = torch.full(
+                        (max_neg, all_neg_input_ids.shape[1]),
+                        self.tokenizer.pad_token_id,
+                        dtype=torch.long
                     )
-                    pad_masks = torch.zeros(
-                        (pad_amount, batch_neg_masks.shape[1]), 
-                        dtype=batch_neg_masks.dtype
-                    )
-                    batch_neg_ids = torch.cat([batch_neg_ids, pad_ids], dim=0)
-                    batch_neg_masks = torch.cat([batch_neg_masks, pad_masks], dim=0)
-                
-                neg_input_ids_batched.append(batch_neg_ids)
-                neg_attention_masks_batched.append(batch_neg_masks)
-                idx += count
+                    dummy_masks = torch.zeros((max_neg, all_neg_attention_masks.shape[1]), dtype=torch.long)
+                    neg_input_ids_batched.append(dummy_ids)
+                    neg_attention_masks_batched.append(dummy_masks)
+                else:
+                    batch_neg_ids = all_neg_input_ids[idx:idx+count]
+                    batch_neg_masks = all_neg_attention_masks[idx:idx+count]
+                    
+                    if count < max_neg:
+                        pad_amount = max_neg - count
+                        pad_ids = torch.full((pad_amount, batch_neg_ids.shape[1]),
+                                           self.tokenizer.pad_token_id, dtype=torch.long)
+                        pad_masks = torch.zeros((pad_amount, batch_neg_masks.shape[1]), dtype=torch.long)
+                        batch_neg_ids = torch.cat([batch_neg_ids, pad_ids], dim=0)
+                        batch_neg_masks = torch.cat([batch_neg_masks, pad_masks], dim=0)
+                    
+                    neg_input_ids_batched.append(batch_neg_ids)
+                    neg_attention_masks_batched.append(batch_neg_masks)
+                    idx += count
             
-            neg_input_ids = torch.stack(neg_input_ids_batched)  # [B, max_neg, seq_len]
+            neg_input_ids = torch.stack(neg_input_ids_batched)
             neg_attention_masks = torch.stack(neg_attention_masks_batched)
         else:
             neg_input_ids = None
@@ -718,6 +863,289 @@ class ContrastiveDataCollator:
         }
 
 
+
+# @dataclass
+# class ContrastiveDataCollator:
+#     """Collator for contrastive learning batches."""
+#     tokenizer: transformers.PreTrainedTokenizer
+#     use_contrastive: bool = True
+    
+#     def __call__(self, instances: List[Dict]) -> Dict[str, torch.Tensor]:
+#         if len(instances):
+#             if "pos_input_ids" not in instances[0].keys():
+#                 contrastive_data= False
+#             else:
+#                 contrastive_data= True
+#         if not self.use_contrastive or  not contrastive_data:
+#             # Regular collation
+#             input_ids = [inst["input_ids"] for inst in instances]
+#             attention_masks = [inst["attention_mask"] for inst in instances]
+#             labels = [inst["labels"] for inst in instances]
+            
+#             input_ids = torch.nn.utils.rnn.pad_sequence(
+#                 input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id
+#             )
+#             attention_masks = torch.nn.utils.rnn.pad_sequence(
+#                 attention_masks, batch_first=True, padding_value=0
+#             )
+#             labels = torch.nn.utils.rnn.pad_sequence(
+#                 labels, batch_first=True, padding_value=IGNORE_INDEX
+#             )
+            
+#             return {
+#                 "input_ids": input_ids,
+#                 "attention_mask": attention_masks,
+#                 "labels": labels
+#             }
+        
+#         # Contrastive collation
+#         batch_size = len(instances)
+        
+#         # Anchors
+#         anchor_input_ids = [inst["input_ids"] for inst in instances]
+#         anchor_attention_masks = [inst["attention_mask"] for inst in instances]
+#         anchor_labels = [inst["labels"] for inst in instances]
+        
+#         anchor_input_ids = torch.nn.utils.rnn.pad_sequence(
+#             anchor_input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id
+#         )
+#         anchor_attention_masks = torch.nn.utils.rnn.pad_sequence(
+#             anchor_attention_masks, batch_first=True, padding_value=0
+#         )
+#         anchor_labels = torch.nn.utils.rnn.pad_sequence(
+#             anchor_labels, batch_first=True, padding_value=IGNORE_INDEX
+#         )
+        
+#         # Positives: flatten, pad, then reshape
+#         all_pos_input_ids = []
+#         all_pos_attention_masks = []
+#         pos_counts = []
+        
+#         for inst in instances:
+#             pos_ids = inst["pos_input_ids"]
+#             pos_masks = inst["pos_attention_masks"]
+#             pos_counts.append(len(pos_ids))
+#             all_pos_input_ids.extend(pos_ids)
+#             all_pos_attention_masks.extend(pos_masks)
+        
+#         max_pos = max(pos_counts) if pos_counts else 0
+        
+#         if len(all_pos_input_ids) > 0:
+#             all_pos_input_ids = torch.nn.utils.rnn.pad_sequence(
+#                 all_pos_input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id
+#             )
+#             all_pos_attention_masks = torch.nn.utils.rnn.pad_sequence(
+#                 all_pos_attention_masks, batch_first=True, padding_value=0
+#             )
+            
+#             # Pad to max_pos per batch item
+#             pos_input_ids_batched = []
+#             pos_attention_masks_batched = []
+#             idx = 0
+#             for count in pos_counts:
+#                 batch_pos_ids = all_pos_input_ids[idx:idx+count]
+#                 batch_pos_masks = all_pos_attention_masks[idx:idx+count]
+                
+#                 # Pad to max_pos
+#                 if count < max_pos:
+#                     pad_amount = max_pos - count
+#                     pad_ids = torch.full(
+#                         (pad_amount, batch_pos_ids.shape[1]), 
+#                         self.tokenizer.pad_token_id, 
+#                         dtype=batch_pos_ids.dtype
+#                     )
+#                     pad_masks = torch.zeros(
+#                         (pad_amount, batch_pos_masks.shape[1]), 
+#                         dtype=batch_pos_masks.dtype
+#                     )
+#                     batch_pos_ids = torch.cat([batch_pos_ids, pad_ids], dim=0)
+#                     batch_pos_masks = torch.cat([batch_pos_masks, pad_masks], dim=0)
+                
+#                 pos_input_ids_batched.append(batch_pos_ids)
+#                 pos_attention_masks_batched.append(batch_pos_masks)
+#                 idx += count
+            
+#             pos_input_ids = torch.stack(pos_input_ids_batched)  # [B, max_pos, seq_len]
+#             pos_attention_masks = torch.stack(pos_attention_masks_batched)
+#         else:
+#             pos_input_ids = None
+#             pos_attention_masks = None
+        
+#         # Negatives: same process
+#         all_neg_input_ids = []
+#         all_neg_attention_masks = []
+#         neg_counts = []
+        
+#         for inst in instances:
+#             neg_ids = inst["neg_input_ids"]
+#             neg_masks = inst["neg_attention_masks"]
+#             neg_counts.append(len(neg_ids))
+#             all_neg_input_ids.extend(neg_ids)
+#             all_neg_attention_masks.extend(neg_masks)
+        
+#         max_neg = max(neg_counts) if neg_counts else 0
+        
+#         if len(all_neg_input_ids) > 0:
+#             all_neg_input_ids = torch.nn.utils.rnn.pad_sequence(
+#                 all_neg_input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id
+#             )
+#             all_neg_attention_masks = torch.nn.utils.rnn.pad_sequence(
+#                 all_neg_attention_masks, batch_first=True, padding_value=0
+#             )
+            
+#             neg_input_ids_batched = []
+#             neg_attention_masks_batched = []
+#             idx = 0
+#             for count in neg_counts:
+#                 batch_neg_ids = all_neg_input_ids[idx:idx+count]
+#                 batch_neg_masks = all_neg_attention_masks[idx:idx+count]
+                
+#                 if count < max_neg:
+#                     pad_amount = max_neg - count
+#                     pad_ids = torch.full(
+#                         (pad_amount, batch_neg_ids.shape[1]), 
+#                         self.tokenizer.pad_token_id, 
+#                         dtype=batch_neg_ids.dtype
+#                     )
+#                     pad_masks = torch.zeros(
+#                         (pad_amount, batch_neg_masks.shape[1]), 
+#                         dtype=batch_neg_masks.dtype
+#                     )
+#                     batch_neg_ids = torch.cat([batch_neg_ids, pad_ids], dim=0)
+#                     batch_neg_masks = torch.cat([batch_neg_masks, pad_masks], dim=0)
+                
+#                 neg_input_ids_batched.append(batch_neg_ids)
+#                 neg_attention_masks_batched.append(batch_neg_masks)
+#                 idx += count
+            
+#             neg_input_ids = torch.stack(neg_input_ids_batched)  # [B, max_neg, seq_len]
+#             neg_attention_masks = torch.stack(neg_attention_masks_batched)
+#         else:
+#             neg_input_ids = None
+#             neg_attention_masks = None
+        
+#         return {
+#             "input_ids": anchor_input_ids,
+#             "attention_mask": anchor_attention_masks,
+#             "labels": anchor_labels,
+#             "pos_input_ids": pos_input_ids,
+#             "pos_attention_masks": pos_attention_masks,
+#             "neg_input_ids": neg_input_ids,
+#             "neg_attention_masks": neg_attention_masks,
+#         }
+
+
+# class ContrastiveTrainer(Seq2SeqTrainer):
+#     """
+#     Custom trainer that combines classification loss with contrastive loss.
+#     Uses decoder's hidden state for contrastive learning to preserve pre-trained knowledge.
+#     """
+#     def __init__(self, *args, contrastive_loss_fn=None, contrastive_weight=0.5, 
+#                  classification_weight=1.0, use_decoder_embedding=True, **kwargs):
+#         super().__init__(*args, **kwargs)
+#         self.contrastive_loss_fn = contrastive_loss_fn
+#         self.contrastive_weight = contrastive_weight
+#         self.classification_weight = classification_weight
+#         self.use_decoder_embedding = use_decoder_embedding
+    
+#     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+#         """
+#         Compute combined loss: classification + contrastive.
+#         """
+#         # Extract contrastive inputs
+#         pos_input_ids = inputs.pop("pos_input_ids", None)
+#         pos_attention_masks = inputs.pop("pos_attention_masks", None)
+#         neg_input_ids = inputs.pop("neg_input_ids", None)
+#         neg_attention_masks = inputs.pop("neg_attention_masks", None)
+        
+#         # Regular forward pass for classification
+#         outputs = model(**inputs)
+#         classification_loss = outputs.loss
+        
+#         # If no contrastive data, return only classification loss
+#         if pos_input_ids is None or neg_input_ids is None:
+#             return (classification_loss, outputs) if return_outputs else classification_loss
+        
+#         # Contrastive learning using decoder embeddings (or encoder first token)
+#         if self.use_decoder_embedding:
+#             # Get decoder-based embeddings for anchor
+#             anchor_embeds = get_decoder_embedding(
+#                 model, 
+#                 inputs["input_ids"], 
+#                 inputs["attention_mask"]
+#             )  # [B, D]
+#         else:
+#             # Alternative: use encoder's first token
+#             encoder_outputs = model.encoder(
+#                 input_ids=inputs["input_ids"],
+#                 attention_mask=inputs["attention_mask"],
+#                 return_dict=True
+#             )
+#             anchor_embeds = get_encoder_first_token(encoder_outputs.last_hidden_state)  # [B, D]
+        
+#         # Get embeddings for positives
+#         batch_size, num_pos, seq_len = pos_input_ids.shape
+#         pos_input_ids_flat = pos_input_ids.view(-1, seq_len)  # [B*N_pos, S]
+#         pos_attention_masks_flat = pos_attention_masks.view(-1, seq_len)
+        
+#         if self.use_decoder_embedding:
+#             pos_embeds_flat = get_decoder_embedding(
+#                 model,
+#                 pos_input_ids_flat,
+#                 pos_attention_masks_flat
+#             )  # [B*N_pos, D]
+#         else:
+#             pos_encoder_outputs = model.encoder(
+#                 input_ids=pos_input_ids_flat,
+#                 attention_mask=pos_attention_masks_flat,
+#                 return_dict=True
+#             )
+#             pos_embeds_flat = get_encoder_first_token(pos_encoder_outputs.last_hidden_state)
+        
+#         pos_embeds = pos_embeds_flat.view(batch_size, num_pos, -1)  # [B, N_pos, D]
+        
+#         # Get embeddings for negatives
+#         batch_size, num_neg, seq_len = neg_input_ids.shape
+#         neg_input_ids_flat = neg_input_ids.view(-1, seq_len)
+#         neg_attention_masks_flat = neg_attention_masks.view(-1, seq_len)
+        
+#         if self.use_decoder_embedding:
+#             neg_embeds_flat = get_decoder_embedding(
+#                 model,
+#                 neg_input_ids_flat,
+#                 neg_attention_masks_flat
+#             )  # [B*N_neg, D]
+#         else:
+#             neg_encoder_outputs = model.encoder(
+#                 input_ids=neg_input_ids_flat,
+#                 attention_mask=neg_attention_masks_flat,
+#                 return_dict=True
+#             )
+#             neg_embeds_flat = get_encoder_first_token(neg_encoder_outputs.last_hidden_state)
+        
+#         neg_embeds = neg_embeds_flat.view(batch_size, num_neg, -1)  # [B, N_neg, D]
+        
+#         # Compute contrastive loss
+#         contrastive_loss = self.contrastive_loss_fn(anchor_embeds, pos_embeds, neg_embeds)
+        
+#         # Combined loss
+#         total_loss = (
+#             self.classification_weight * classification_loss + 
+#             self.contrastive_weight * contrastive_loss
+#         )
+        
+#         # Log individual losses
+#         if self.state.global_step % 10 == 0:
+#             logging.info(
+#                 f"Step {self.state.global_step}: "
+#                 f"Total={total_loss:.4f}, "
+#                 f"Classification={classification_loss:.4f}, "
+#                 f"Contrastive={contrastive_loss:.4f}"
+#             )
+        
+#         return (total_loss, outputs) if return_outputs else total_loss
+
+
 class ContrastiveTrainer(Seq2SeqTrainer):
     """
     Custom trainer that combines classification loss with contrastive loss.
@@ -730,11 +1158,14 @@ class ContrastiveTrainer(Seq2SeqTrainer):
         self.contrastive_weight = contrastive_weight
         self.classification_weight = classification_weight
         self.use_decoder_embedding = use_decoder_embedding
+
+        self.custom_loss_tracker = {'classification': [], 'contrastive': []}
     
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
         Compute combined loss: classification + contrastive.
         """
+        print("Using custom contrastive loss")
         # Extract contrastive inputs
         pos_input_ids = inputs.pop("pos_input_ids", None)
         pos_attention_masks = inputs.pop("pos_attention_masks", None)
@@ -745,9 +1176,17 @@ class ContrastiveTrainer(Seq2SeqTrainer):
         outputs = model(**inputs)
         classification_loss = outputs.loss
         
-        # If no contrastive data, return only classification loss
-        if pos_input_ids is None or neg_input_ids is None:
+        # If no contrastive data (no positives), return only classification loss
+        if pos_input_ids is None or pos_input_ids.numel() == 0 or pos_input_ids.shape[1] == 0:
             return (classification_loss, outputs) if return_outputs else classification_loss
+        
+        # Get anchor labels for in-batch negative mining
+        # Decode labels to get 0/1 values
+        labels_decoded = inputs["labels"].clone()
+        labels_decoded[labels_decoded == -100] = self.tokenizer.pad_token_id
+        labels_text = self.tokenizer.batch_decode(labels_decoded, skip_special_tokens=True)
+        anchor_labels = torch.tensor([int(l.strip() == "1") for l in labels_text], 
+                                    device=inputs["labels"].device)
         
         # Contrastive learning using decoder embeddings (or encoder first token)
         if self.use_decoder_embedding:
@@ -787,29 +1226,38 @@ class ContrastiveTrainer(Seq2SeqTrainer):
         
         pos_embeds = pos_embeds_flat.view(batch_size, num_pos, -1)  # [B, N_pos, D]
         
-        # Get embeddings for negatives
-        batch_size, num_neg, seq_len = neg_input_ids.shape
-        neg_input_ids_flat = neg_input_ids.view(-1, seq_len)
-        neg_attention_masks_flat = neg_attention_masks.view(-1, seq_len)
+        # Get embeddings for negatives (if available)
+        neg_embeds = None
+        if neg_input_ids is not None and neg_input_ids.numel() > 0 and neg_input_ids.shape[1] > 0:
+            batch_size, num_neg, seq_len = neg_input_ids.shape
+            neg_input_ids_flat = neg_input_ids.view(-1, seq_len)
+            neg_attention_masks_flat = neg_attention_masks.view(-1, seq_len)
+            
+            if self.use_decoder_embedding:
+                neg_embeds_flat = get_decoder_embedding(
+                    model,
+                    neg_input_ids_flat,
+                    neg_attention_masks_flat
+                )  # [B*N_neg, D]
+            else:
+                neg_encoder_outputs = model.encoder(
+                    input_ids=neg_input_ids_flat,
+                    attention_mask=neg_attention_masks_flat,
+                    return_dict=True
+                )
+                neg_embeds_flat = get_encoder_first_token(neg_encoder_outputs.last_hidden_state)
+            
+            neg_embeds = neg_embeds_flat.view(batch_size, num_neg, -1)  # [B, N_neg, D]
         
-        if self.use_decoder_embedding:
-            neg_embeds_flat = get_decoder_embedding(
-                model,
-                neg_input_ids_flat,
-                neg_attention_masks_flat
-            )  # [B*N_neg, D]
-        else:
-            neg_encoder_outputs = model.encoder(
-                input_ids=neg_input_ids_flat,
-                attention_mask=neg_attention_masks_flat,
-                return_dict=True
-            )
-            neg_embeds_flat = get_encoder_first_token(neg_encoder_outputs.last_hidden_state)
-        
-        neg_embeds = neg_embeds_flat.view(batch_size, num_neg, -1)  # [B, N_neg, D]
-        
-        # Compute contrastive loss
-        contrastive_loss = self.contrastive_loss_fn(anchor_embeds, pos_embeds, neg_embeds)
+        # Compute contrastive loss with in-batch negatives fallback
+        contrastive_loss = self.contrastive_loss_fn(
+            anchor_embeds=anchor_embeds,
+            positive_embeds=pos_embeds,
+            negative_embeds=neg_embeds,
+            anchor_labels=anchor_labels,
+            all_batch_embeds=anchor_embeds,  # Use all anchors for in-batch negatives
+            all_batch_labels=anchor_labels
+        )
         
         # Combined loss
         total_loss = (
@@ -819,15 +1267,35 @@ class ContrastiveTrainer(Seq2SeqTrainer):
         
         # Log individual losses
         if self.state.global_step % 10 == 0:
-            logging.info(
+            has_explicit_neg = neg_embeds is not None
+            print(
                 f"Step {self.state.global_step}: "
                 f"Total={total_loss:.4f}, "
                 f"Classification={classification_loss:.4f}, "
-                f"Contrastive={contrastive_loss:.4f}"
+                f"Contrastive={contrastive_loss:.4f} "
+                f"(explicit_neg={has_explicit_neg})"
             )
+            # 2. Append the detached, scalar values (.item()) to avoid memory leaks
+            self.custom_loss_tracker['classification'].append(classification_loss.item())
+            self.custom_loss_tracker['contrastive'].append(contrastive_loss.item())
         
         return (total_loss, outputs) if return_outputs else total_loss
 
+    def log(self, logs: Dict[str, float]) -> None:
+        """
+        Override the log method to inject custom metrics into the standard output dictionary.
+        """
+        # 3. Calculate the average of the custom losses since the last log step
+        if len(self.custom_loss_tracker['classification']) > 0:
+            logs["class_loss"] = sum(self.custom_loss_tracker['classification']) / len(self.custom_loss_tracker['classification'])
+            logs["cont_loss"] = sum(self.custom_loss_tracker['contrastive']) / len(self.custom_loss_tracker['contrastive'])
+            
+            # Clear the trackers for the next logging window
+            self.custom_loss_tracker['classification'] = []
+            self.custom_loss_tracker['contrastive'] = []
+
+        # 4. Call the parent class to handle the actual printing/logging
+        super().log(logs)
 
 def postprocess_text(preds, labels):
     preds = [pred.strip() for pred in preds]

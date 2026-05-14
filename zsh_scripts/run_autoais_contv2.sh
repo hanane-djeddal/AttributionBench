@@ -10,19 +10,20 @@ export TRANSFORMERS_OFFLINE=1
 for model in "${models[@]}"; do
     # 32 1e-5
     # ***************** Set parameters here *****************
-    dataset_version=attributionBench_hardpos_augmentedQwen30B_allerrors_contrastive 
+    dataset_version=attributionBench_random_augmentation_hardpos #_mixedAll #attributionBench_hardpos_augmentedQwen30B_allerrors_contrastive #attributionBench_augmentedQwen30B_allerrors_contrastive_extendalltrain #attributionBench_augmentedQwen30B_allerrors_contrastive_extendalltrainshuffled #   
     template=base_c_e
     lr=5e-5 #3e-5  #1e-5 #5e-5 #
     cont_weight=1.0 #0.5 #0.1  #1e-5  0.5 #
     classif_weight=1.0
-    num_train_epoches=10
+    num_train_epoches=4
+    tau=1.0
     start_gpu_index=0
     master_port=11111
     per_device_train_batch_size=1
     gas=4
     nodes=4
-    num_neg=8
-    num_pos=8
+    num_neg=5
+    num_pos=5
     cche_dir=$WORK/.cache/huggingface
     # ***************** The followings are auto-calculated parameters *****************
     cuda_devices=$(seq -s ',' $start_gpu_index $(($start_gpu_index + $nodes - 1)))
@@ -30,18 +31,20 @@ for model in "${models[@]}"; do
     nodes=4
     bs=$((gas * nodes))
     eval_bs=1 #$((per_device_train_batch_size * 2)) #template-${template}
-    setting=bs${bs}-lr${lr}-gas${gas}-contW${cont_weight}-classifW${classif_weight}-Ep${num_train_epoches}-nneg${num_neg}-npos${num_pos}
+    setting=bs${bs}-lr${lr}-gas${gas}-contW${cont_weight}-classifW${classif_weight}-Ep${num_train_epoches}-nneg${num_neg}-npos${num_pos}-filtered-tau${tau}
     current_time=$(date +"%Y-%m-%d-%H:%M:%S")
 
     echo ${CUDA_VISIBLE_DEVICES}
     # make sure you want to do the deletion  rm -rf $OUTPUT_DIR
     # ************************************************************************************
-    export OUTPUT_DIR=../models/attribution_models/T5-use_InbatchNegatives-${dataset_version}-${setting}
+    #export OUTPUT_DIR=../models/attribution_models/T5-use_InbatchNegatives-${dataset_version}-${setting}
+    export OUTPUT_DIR=../models/attribution_models/T5-random_baselinev2-${dataset_version}-${setting}
+
     #rm -rf $OUTPUT_DIR
     # ************************************************************************************
 
     export WANDB_NAME=${model}_${setting}_dataset_${dataset_version}_${current_time}
-
+    #        --filter_error_types True\
     # # train         --evaluation_strategy "no" \ --cache_dir ${cche_dir}  --generation_max_length 128 \ --generation_num_beams 1 \
     torchrun --nproc_per_node ${nodes} --master-port ${master_port} ../src/train/autoais_train_contv2.py \
         --model_name_or_path $model \
@@ -58,6 +61,7 @@ for model in "${models[@]}"; do
         --classification_weight ${classif_weight} \
         --num_positives ${num_pos}\
         --num_negatives ${num_neg}\
+        --contrastive_temperature ${tau}\
         --use_decoder_embedding True\
         --save_total_limit 1 \
         --eval_strategy "no"\
@@ -83,7 +87,7 @@ for model in "${models[@]}"; do
         --template_path ../src/prompts.json \
         --model_name ${OUTPUT_DIR} \
         --bs 1 \
-        --split test_ood test \
+        --split test test_ood\
         --output_dir ../inference_results/${dataset_version} \
         --max_length 2048  \
         --max_new_tokens 6 \
